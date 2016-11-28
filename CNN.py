@@ -5,13 +5,10 @@ matplotlib.use('TkAgg')
 from numpy import float32
 import os
 import matplotlib.pyplot as plt
-import matplotlib.image as mpimg
 import tensorflow as tf
 import numpy as np
-from sklearn.metrics import confusion_matrix
 import time
 from datetime import timedelta
-import math
 import cv2
 from tensorflow.contrib.learn.python.learn.datasets.mnist import DataSet
 from tensorflow.contrib.learn.python.learn.datasets.base import Datasets
@@ -137,13 +134,15 @@ def equalize_distribution(xs, ys, coords, sizes):
             # Perform a sequence of modifications to generate the 'needed' new data, using
             # a uniform distribution for the actual modifications
             if (needed > 0):
-#                images = [crop(xs[i], coords[i], sizes[i]) for i in inverse[cls]]  # Get the exact indices of each image for the current class
                 images = [xs[i] for i in inverse[cls]]  # Get the exact indices of each image for the current class
 
                 for idx in range(needed):
                     i = idx % len(images)
                     image = images[i]
+                    # Can look at: https://github.com/Hvass-Labs/TensorFlow-Tutorials/blob/master/06_CIFAR-10.ipynb
+                    #   for ideas for image transformations
                     #image = crop(image, coords[i], sizes[i])
+                    #image = addnoise(image, 5)
                     #image = rotate(image)
                     #image = sharpen_blur(image)
                     #image = push_away(image, (img_size, img_size, num_channels))
@@ -189,9 +188,7 @@ with open(testing_file, mode='rb') as f:
     test = pickle.load(f)
 
 x_train, y_train, sizes_train, coords_train = train[FEATURES], train[LABELS], train[SIZES], train[COORDS]
-#del train # free up memory
 x_test, y_test, sizes_test, coords_test = test[FEATURES], test[LABELS], test[SIZES], test[COORDS]
-#del test # free up memory
 
 img_size = len(x_train[0])
 num_channels = len(x_train[0][0][0])
@@ -238,17 +235,6 @@ x_train = np.array([ x_train[i] for i in seq_train])
 y_train = np.array([ y_train[i] for i in seq_train])
 x_test = np.array([ x_test[i] for i in seq_test])
 y_test = np.array([ y_test[i] for i in seq_test])
-
-# TEMPORARY: Swap some of the test data into the training data and set the training data as the test data
-# DO NOT USE the COORDS and SIZES arrays if this is being done.
-#print("Doing test/train swapping...")
-#z = len(x_test)
-#x_tmp = x_test
-#y_tmp = y_test
-#x_test = np.array(x_train[0:z][:][:][:])
-#y_test = np.array(y_train[0:z][:][:][:])
-#x_train = np.append(x_train[z:][:][:][:], x_tmp, axis=0)
-#y_train = np.append(y_train[z:][:][:][:], y_tmp, axis=0)
 
 # Normalize the images (and save originals)
 x_train_ = np.zeros_like(x_train, dtype=float32)
@@ -342,22 +328,7 @@ def plot_example_errors(cls_pred, correct):
     cls_true = data.test.cls[incorrect]
     plot_images(images=images[0:9], cls_true=cls_true[0:9], cls_pred=cls_pred[0:9])
 
-
-# ### Helper-function to plot confusion matrix
-def plot_confusion_matrix(cls_pred):
-    cls_true = data.test.cls
-    cm = confusion_matrix(y_true=cls_true, y_pred=cls_pred)
-    print(cm)
-    plt.matshow(cm)
-    plt.colorbar()
-    tick_marks = np.arange(num_classes)
-    plt.xticks(tick_marks, range(num_classes))
-    plt.yticks(tick_marks, range(num_classes))
-    plt.xlabel('Predicted')
-    plt.ylabel('True')
-    plt.show()
-
-def print_test_accuracy(show_example_errors=False, show_confusion_matrix=False):
+def print_test_accuracy(show_example_errors=False):
     num_test = len(data.test.images)
     cls_pred = np.zeros(shape=num_test, dtype=np.int)
     i = 0
@@ -377,40 +348,6 @@ def print_test_accuracy(show_example_errors=False, show_confusion_matrix=False):
     if show_example_errors:
         print("Example errors:")
         plot_example_errors(cls_pred=cls_pred, correct=correct)
-    if show_confusion_matrix:
-        print("Confusion Matrix:")
-        plot_confusion_matrix(cls_pred=cls_pred)
-
-# Helper-function for plotting convolutional weights
-def plot_conv_weights(weights, input_channel=0):
-    w = session.run(weights)
-    w_min = np.min(w)
-    w_max = np.max(w)
-    num_filters = w.shape[3]
-    num_grids = math.ceil(math.sqrt(num_filters))
-    fig, axes = plt.subplots(num_grids, num_grids)
-    for i, ax in enumerate(axes.flat):
-        if i<num_filters:
-            img = w[:, :, input_channel, i]
-            ax.imshow(img, vmin=w_min, vmax=w_max, interpolation='nearest', cmap='seismic')
-        ax.set_xticks([])
-        ax.set_yticks([])
-    plt.show()
-
-# ### Helper-function for plotting the output of a convolutional layer
-def plot_conv_layer(layer, image):
-    feed_dict = {x: [image]}
-    values = session.run(layer, feed_dict=feed_dict)
-    num_filters = values.shape[3]
-    num_grids = math.ceil(math.sqrt(num_filters))
-    fig, axes = plt.subplots(num_grids, num_grids)
-    for i, ax in enumerate(axes.flat):
-        if i<num_filters:
-            img = values[0, :, :, i]
-            ax.imshow(img, interpolation='nearest', cmap='binary')
-        ax.set_xticks([])
-        ax.set_yticks([])
-    plt.show()
 
 # Helper-function for plotting an image.
 def plot_image(image):
@@ -483,25 +420,3 @@ for _ in range (0, 100):
     print_test_accuracy()
     
 print_test_accuracy(show_example_errors=True)
-#print_test_accuracy()
-#optimize(num_iterations=1)
-#print_test_accuracy()
-#optimize(num_iterations=99) # We already performed 1 iteration above.
-#print_test_accuracy(show_example_errors=False)
-#optimize(num_iterations=900) # We performed 100 iterations above.
-#print_test_accuracy(show_example_errors=False)
-#optimize(num_iterations=9000) # We performed 1000 iterations above.
-#print_test_accuracy(show_example_errors=False, show_confusion_matrix=False)
-
-# Plot an image from the test-set which will be used as an example below.
-#image1 = x_test[0]
-#plot_image(image1)
-#image2 = x_test[13]
-#plot_image(image2)
-#plot_conv_weights(weights=weights_conv1)
-#plot_conv_layer(layer=layer_conv1, image=image1)
-#plot_conv_layer(layer=layer_conv1, image=image2)
-#plot_conv_weights(weights=weights_conv2, input_channel=0)
-#plot_conv_weights(weights=weights_conv2, input_channel=1)
-#plot_conv_layer(layer=layer_conv2, image=image1)
-#plot_conv_layer(layer=layer_conv2, image=image2)
