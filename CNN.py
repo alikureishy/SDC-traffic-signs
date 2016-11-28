@@ -1,9 +1,11 @@
 
 #!!get_ipython().magic('matplotlib inline')
 import matplotlib
-from numpy import float32
 matplotlib.use('TkAgg')
+from numpy import float32
+import os
 import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 import tensorflow as tf
 import numpy as np
 from sklearn.metrics import confusion_matrix
@@ -15,82 +17,144 @@ from tensorflow.contrib.learn.python.learn.datasets.mnist import DataSet
 from tensorflow.contrib.learn.python.learn.datasets.base import Datasets
 from tensorflow.contrib.learn.python.learn.datasets.mnist import dense_to_one_hot
 
-# ## Load Data
-#from tensorflow.examples.tutorials.mnist import input_data
-import pickle
-training_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/train.p'
-testing_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/test.p'
-with open(training_file, mode='rb') as f:
-    train = pickle.load(f)
-with open(testing_file, mode='rb') as f:
-    test = pickle.load(f)
-FEATURES = 'features'
-LABELS = 'labels'
-SIZES = 'sizes'
-COORDS = 'coords'
-x_train, y_train, sizes_train, coords_train = train[FEATURES], train[LABELS], train[SIZES], train[COORDS]
-x_test, y_test, sizes_test, coords_test = test[FEATURES], test[LABELS], test[SIZES], test[COORDS]
+def crop(image, coords, size):
+    
+        # Original dimensions of the image
+    org_x = size[0]
+    org_y = size[1]
+    
+    # Scaling : Image has been scaled from its original size down to the processing size (32)
+    sz_x = len(image)
+    sz_y = len(image[0])
+    
+    # Ratio : Of actual/original (this is to scale the rectangular coordinates around image)
+    rat_x = float(sz_x / org_x)
+    rat_y = float(sz_y / org_y)
+    
+    # Rectangle: Scale the rectangular box based on the scaling above
+    x1 = rat_x * coords[0]
+    x2 = rat_x * coords[2]
+    y1 = rat_y * coords[1]
+    y2 = rat_y * coords[3]
 
-# Shuffle the training and testing data:
-seq_train = np.arange(0, len(x_train))
-seq_test = np.arange(0, len(x_test))
-np.random.shuffle(seq_train)
-np.random.shuffle(seq_test)
-x_train = np.array([ x_train[i] for i in seq_train])
-y_train = np.array([ y_train[i] for i in seq_train])
-x_test = np.array([ x_test[i] for i in seq_test])
-y_test = np.array([ y_test[i] for i in seq_test])
-#sizes_train = np.array([ sizes_train[i] for i in seq_train])
-#coords_train = np.array([ coords_train[i] for i in seq_train])
+    cropped = image[x1:x2, y1:y2]
 
-# TEMPORARY: Swap some of the test data into the training data and set the training data as the test data
-# DO NOT USE the COORDS and SIZES arrays if this is being done.
-print("Doing test/train swapping...")
-z = len(x_test)
-x_tmp = x_test
-y_tmp = y_test
-x_test = np.array(x_train[0:z][:][:][:])
-y_test = np.array(y_train[0:z][:][:][:])
-x_train = np.append(x_train[z:][:][:][:], x_tmp, axis=0)
-y_train = np.append(y_train[z:][:][:][:], y_tmp, axis=0)
+    return cropped
 
-# Normalize the images
-x_train_ = np.zeros_like(x_train, dtype=float32)
-x_test_ = np.zeros_like(x_test, dtype=float32)
-for i in range(0, len(x_train)):
-    cv2.normalize(x_train[i], x_train_[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-x_train = x_train_
-for i in range(0, len(x_test)):
-    cv2.normalize(x_test[i], x_test_[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
-x_test = x_test_
+def transform_image(image, ang_range, shear_range, trans_range):
+    '''
+    This function transforms images to generate new images.
+    The function takes in following arguments,
+    1- Image
+    2- ang_range: Range of angles for rotation
+    3- shear_range: Range of values to apply affine transform to
+    4- trans_range: Range of values to apply translations over. 
+    
+    A Random uniform distribution is used to generate different parameters for transformation
+    
+    '''
+    # Rotation
 
-# Convert to the Dataset format
-num_classes = len(np.unique(y_train))
-y_train = dense_to_one_hot(y_train, num_classes) # One-hot encode all the labels
-y_test = dense_to_one_hot(y_test, num_classes) # One-hot encode all the labels
+    ang_rot = np.random.uniform(ang_range)-ang_range/2
+    rows,cols,ch = image.shape    
+    Rot_M = cv2.getRotationMatrix2D((cols/2,rows/2),ang_rot,1)
 
-traindata = DataSet(x_train, y_train, reshape=False)
-testdata = DataSet(x_test, y_test, reshape=False)
+    # Translation
+    tr_x = trans_range*np.random.uniform()-trans_range/2
+    tr_y = trans_range*np.random.uniform()-trans_range/2
+    Trans_M = np.float32([[1,0,tr_x],[0,1,tr_y]])
 
-data = Datasets(train=traindata, validation=None, test=testdata)
-data.test.cls = np.argmax(data.test.labels, axis=1)
-data.train.cls = np.argmax(data.train.labels, axis=1)
+    # Shear
+    pts1 = np.float32([[5,5],[20,5],[5,20]])
 
-img_size = len(data.train.images[0])
-num_channels = len(data.train.images[0][0][0])
-img_shape = data.train.images[0].shape #(img_size, img_size, num_channels)
+    pt1 = 5+shear_range*np.random.uniform()-shear_range/2
+    pt2 = 20+shear_range*np.random.uniform()-shear_range/2
 
-(_, counts) = np.unique(data.train.cls, return_counts=True)
-distribution = np.argsort(counts)[::-1]
-for i in distribution:
-    print ("{}:\t{}".format(i, counts[i]))
+    pts2 = np.float32([[pt1,5],[pt2,pt1],[5,pt2]])
 
-print("Size of:")
-print("- Training-set:\t\t{}".format(len(data.train.labels)))
-print("- Test-set:\t\t{}".format(len(data.test.labels)))
-print("- Shape:\t\t{}".format(img_shape))
-print("- Num channels:\t{}".format(num_channels))
-print("- Num classes:\t{}".format(num_classes))
+    shear_M = cv2.getAffineTransform(pts1,pts2)
+        
+    image = cv2.warpAffine(image,Rot_M,(cols,rows))
+    image = cv2.warpAffine(image,Trans_M,(cols,rows))
+    image = cv2.warpAffine(image,shear_M,(cols,rows))
+    
+    return image
+
+def sharpen_blur(image):
+    return image
+
+def rotate(image):
+    return image
+
+def brighten_darken(image):
+    return image
+
+def push_away(image, newshape):
+    return image
+
+def change_perspective(image):
+    return image
+
+def resize(image, size):
+    if size==image.shape[0] and size==image.shape[1]:
+        return image
+    
+    # we need to keep in mind aspect ratio so the image does
+    # not look skewed or distorted -- therefore, we calculate
+    # the ratio of the dimensions of the new image to the old image
+    r_x = size / image.shape[0]
+    r_y = size / image.shape[1]
+    dim = (int(image.shape[0] * r_x), int(image.shape[1] * r_y))
+
+    # perform the actual resizing of the image and show it
+    resized = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+    return resized
+
+def equalize_distribution(xs, ys, coords, sizes):
+    more_images = []
+    more_labels = []
+    
+    (num_images, img_size, _, num_channels) = xs.shape
+
+    (unique, counts) = np.unique(ys, return_counts=True)
+    maxcount = max(counts)
+    mincount = min(counts)
+    delta_threshold = 25 # percent
+    
+    n_classes = len(unique) # Now we will assume that the uniques are 0..n (strictly increasing and continuous)
+    # Calculate inverse lookup
+    inverse = np.empty((n_classes, 0)).tolist()
+    for i in range(len(xs)):
+        inverse[ys[i]].append(i)
+
+    if (100 - (mincount * 100 / maxcount)) > delta_threshold:
+        idealcount = maxcount #int(maxcount + .25 * maxcount)
+        descending = np.argsort(counts)[::-1] # Sort the classes in descending order based on 'counts' array values
+        for cls in descending:
+            needed = idealcount - counts[cls]
+            print ("Class\t{}:\t{} examples \t[% = {}\tNeed = {} more]".format(cls, counts[cls], counts[cls]*100/num_images, needed))
+            
+            # Perform a sequence of modifications to generate the 'needed' new data, using
+            # a uniform distribution for the actual modifications
+            if (needed > 0):
+#                images = [crop(xs[i], coords[i], sizes[i]) for i in inverse[cls]]  # Get the exact indices of each image for the current class
+                images = [xs[i] for i in inverse[cls]]  # Get the exact indices of each image for the current class
+
+                for idx in range(needed):
+                    i = idx % len(images)
+                    image = images[i]
+                    #image = crop(image, coords[i], sizes[i])
+                    #image = rotate(image)
+                    #image = sharpen_blur(image)
+                    #image = push_away(image, (img_size, img_size, num_channels))
+                    #image = change_perspective(image)
+                    image = transform_image(image,20,10,5)
+                    image = resize(image, img_size) # Get image back to required size, in case that changed
+                    
+                    more_images.append(image)
+                    more_labels.append(cls)
+        
+    return more_images, more_labels
 
 # Function used to plot 9 images in a 3x3 grid, and writing the true and predicted classes below each image.
 def plot_images(images, cls_true, cls_pred=None):
@@ -107,6 +171,111 @@ def plot_images(images, cls_true, cls_pred=None):
         ax.set_xticks([])
         ax.set_yticks([])
     plt.show()
+
+# ## Load Data
+#from tensorflow.examples.tutorials.mnist import input_data
+import pickle
+training_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/train.p'
+testing_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/test.p'
+more_data_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/more_data.p'
+
+FEATURES = 'features'
+LABELS = 'labels'
+SIZES = 'sizes'
+COORDS = 'coords'
+with open(training_file, mode='rb') as f:
+    train = pickle.load(f)
+with open(testing_file, mode='rb') as f:
+    test = pickle.load(f)
+
+x_train, y_train, sizes_train, coords_train = train[FEATURES], train[LABELS], train[SIZES], train[COORDS]
+#del train # free up memory
+x_test, y_test, sizes_test, coords_test = test[FEATURES], test[LABELS], test[SIZES], test[COORDS]
+#del test # free up memory
+
+img_size = len(x_train[0])
+num_channels = len(x_train[0][0][0])
+img_shape = x_train[0].shape #(img_size, img_size, num_channels)
+
+# Determining augmentation
+augment_data = False
+if augment_data:
+    if not os.path.isfile(more_data_file):
+        print ("Processing augmentation...")
+        more_images, more_labels = equalize_distribution(x_train, y_train, coords_train, sizes_train)
+        if (len(more_images)>0):
+            print('Saving data to pickle file...')
+            try:
+                with open(more_data_file, 'wb') as pfile:
+                    pickle.dump(
+                        {
+                            FEATURES: more_images,
+                            LABELS: more_labels,
+                        },
+                        pfile, pickle.HIGHEST_PROTOCOL)
+                print ('Augmented data ({} images) cached in pickle file.'.format(len(more_images)))
+            except Exception as e:
+                print('Unable to save data to', more_data_file, ':', e)
+                raise
+    
+    with open(more_data_file, 'rb') as f:
+        more = pickle.load(f)
+        x_more, y_more = more[FEATURES], more[LABELS]
+        print ("Augmented data count:\t{}".format(len(x_more)))
+        plot_images(x_more[0:9], cls_true=y_more[0:9])
+        x_train = np.concatenate((x_train, x_more))
+        y_train = np.concatenate((y_train, y_more))
+
+# Free up some memory
+del sizes_train, sizes_test, coords_train, coords_test
+
+# Shuffle the training and testing data:
+seq_train = np.arange(0, len(x_train))
+seq_test = np.arange(0, len(x_test))
+np.random.shuffle(seq_train)
+np.random.shuffle(seq_test)
+x_train = np.array([ x_train[i] for i in seq_train])
+y_train = np.array([ y_train[i] for i in seq_train])
+x_test = np.array([ x_test[i] for i in seq_test])
+y_test = np.array([ y_test[i] for i in seq_test])
+
+# TEMPORARY: Swap some of the test data into the training data and set the training data as the test data
+# DO NOT USE the COORDS and SIZES arrays if this is being done.
+#print("Doing test/train swapping...")
+#z = len(x_test)
+#x_tmp = x_test
+#y_tmp = y_test
+#x_test = np.array(x_train[0:z][:][:][:])
+#y_test = np.array(y_train[0:z][:][:][:])
+#x_train = np.append(x_train[z:][:][:][:], x_tmp, axis=0)
+#y_train = np.append(y_train[z:][:][:][:], y_tmp, axis=0)
+
+# Normalize the images (and save originals)
+x_train_ = np.zeros_like(x_train, dtype=float32)
+x_test_ = np.zeros_like(x_test, dtype=float32)
+for i in range(0, len(x_train)):
+    cv2.normalize(x_train[i], x_train_[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+for i in range(0, len(x_test)):
+    cv2.normalize(x_test[i], x_test_[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+
+# Convert to the Dataset format
+num_classes = len(np.unique(y_train))
+y_train = dense_to_one_hot(y_train, num_classes) # One-hot encode all the labels
+y_test = dense_to_one_hot(y_test, num_classes) # One-hot encode all the labels
+
+traindata = DataSet(x_train_, y_train, reshape=False) # Use the normalized images (x_train_)
+testdata = DataSet(x_test_, y_test, reshape=False) # Use the normalized images (x_test_)
+
+data = Datasets(train=traindata, validation=None, test=testdata)
+data.test.cls = np.argmax(data.test.labels, axis=1)
+data.train.cls = np.argmax(data.train.labels, axis=1)
+
+print("Size of:")
+print("- Training-set:\t\t{}".format(len(data.train.labels)))
+print("- Test-set:\t\t{}".format(len(data.test.labels)))
+print("- Shape:\t\t{}".format(img_shape))
+print("- Num channels:\t{}".format(num_channels))
+print("- Num classes:\t{}".format(num_classes))
 
 def new_weights(shape):
     return tf.Variable(tf.truncated_normal(shape, stddev=0.05))
@@ -168,7 +337,7 @@ def optimize(num_iterations):
 # Function for plotting examples of images from the test-set that have been mis-classified.
 def plot_example_errors(cls_pred, correct):
     incorrect = (correct == False)
-    images = data.test.images[incorrect]
+    images = x_test[incorrect]
     cls_pred = cls_pred[incorrect]
     cls_true = data.test.cls[incorrect]
     plot_images(images=images[0:9], cls_true=cls_true[0:9], cls_pred=cls_pred[0:9])
@@ -275,7 +444,7 @@ num_filters2 = 36         # There are 36 of these filters.
 # Fully-connected layer.
 fc_size = 128             # Number of neurons in fully-connected layer.
 
-images = data.test.images[0:9]
+images = x_test[0:9]
 cls_true = data.test.cls[0:9]
 plot_images(images=images, cls_true=cls_true)
 
@@ -290,8 +459,8 @@ layer, _ = layer_conv1, weights_conv1 = new_conv_layer(input=x, num_input_channe
 layer, _ = layer_conv2, weights_conv2 = new_conv_layer(input=layer, num_input_channels=num_filters1, filter_size=filter_size2, num_filters=num_filters2, use_pooling=True)
 layer, _ = layer_flat, num_features = flatten_layer(layer)
 layer = layer_fc1 = new_fc_layer(input=layer, num_inputs=num_features, num_outputs=fc_size, use_relu=True)
+layer = layer_dropout = tf.nn.dropout(layer, keep_prob)
 layer = layer_fc2 = new_fc_layer(input=layer, num_inputs=fc_size, num_outputs=num_classes, use_relu=False)
-#layer = layer_dropout = tf.nn.dropout(layer, keep_prob)
 y_pred = tf.nn.softmax(layer)
 y_pred_cls = tf.argmax(y_pred, dimension=1)
 cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=layer, labels=y_true)
@@ -325,9 +494,9 @@ print_test_accuracy(show_example_errors=True)
 #print_test_accuracy(show_example_errors=False, show_confusion_matrix=False)
 
 # Plot an image from the test-set which will be used as an example below.
-image1 = data.test.images[0]
+#image1 = x_test[0]
 #plot_image(image1)
-image2 = data.test.images[13]
+#image2 = x_test[13]
 #plot_image(image2)
 #plot_conv_weights(weights=weights_conv1)
 #plot_conv_layer(layer=layer_conv1, image=image1)
