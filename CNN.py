@@ -10,9 +10,8 @@ import numpy as np
 import time
 from datetime import timedelta
 import cv2
-from tensorflow.contrib.learn.python.learn.datasets.mnist import DataSet
-from tensorflow.contrib.learn.python.learn.datasets.base import Datasets
 from tensorflow.contrib.learn.python.learn.datasets.mnist import dense_to_one_hot
+from collections import namedtuple
 
 def crop(image, coords, size):
     
@@ -40,7 +39,7 @@ def crop(image, coords, size):
 
 def transform_image(image, ang_range, shear_range, trans_range):
     '''
-    This function transforms images to generate new images.
+    This function transforms input_images to generate new input_images.
     The function takes in following arguments,
     1- Image
     2- ang_range: Range of angles for rotation
@@ -147,7 +146,7 @@ def equalize_distribution(xs, ys, coords, sizes):
                     #image = sharpen_blur(image)
                     #image = push_away(image, (img_size, img_size, num_channels))
                     #image = change_perspective(image)
-                    image = transform_image(image,20,10,5)
+                    image = transform_image(image, 20, 10, 5)
                     image = resize(image, img_size) # Get image back to required size, in case that changed
                     
                     more_images.append(image)
@@ -155,17 +154,17 @@ def equalize_distribution(xs, ys, coords, sizes):
         
     return more_images, more_labels
 
-# Function used to plot 9 images in a 3x3 grid, and writing the true and predicted classes below each image.
-def plot_images(images, cls_true, cls_pred=None):
-    assert len(images) == len(cls_true) == 9
+# Function used to plot 9 input_images in a 3x3 grid, and writing the true and predicted classes below each image.
+def plot_images(images, actual_labels, label_predictor=None):
+    assert len(images) == len(actual_labels) == 9
     fig, axes = plt.subplots(3, 3)
     fig.subplots_adjust(hspace=0.3, wspace=0.3)
     for i, ax in enumerate(axes.flat):
         ax.imshow(images[i].reshape(img_shape), cmap='binary')
-        if cls_pred is None:
-            xlabel = "True: {0}".format(cls_true[i])
+        if label_predictor is None:
+            xlabel = "True: {0}".format(actual_labels[i])
         else:
-            xlabel = "True: {0}, Pred: {1}".format(cls_true[i], cls_pred[i])
+            xlabel = "True: {0}, Pred: {1}".format(actual_labels[i], label_predictor[i])
         ax.set_xlabel(xlabel)
         ax.set_xticks([])
         ax.set_yticks([])
@@ -177,6 +176,8 @@ import pickle
 training_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/train.p'
 testing_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/test.p'
 more_data_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/more_data.p'
+checkpoint_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/traffic.chk'
+abort_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/abort'
 
 FEATURES = 'features'
 LABELS = 'labels'
@@ -195,13 +196,14 @@ num_channels = len(x_train[0][0][0])
 img_shape = x_train[0].shape #(img_size, img_size, num_channels)
 
 # Determining augmentation
-augment_data = False
+augment_data = True
 if augment_data:
+    print ("Processing augmentation...")
     if not os.path.isfile(more_data_file):
-        print ("Processing augmentation...")
+        print ("\tGenerating fresh data...")
         more_images, more_labels = equalize_distribution(x_train, y_train, coords_train, sizes_train)
         if (len(more_images)>0):
-            print('Saving data to pickle file...')
+            print('\t\tSaving data to pickle file...')
             try:
                 with open(more_data_file, 'wb') as pfile:
                     pickle.dump(
@@ -210,58 +212,67 @@ if augment_data:
                             LABELS: more_labels,
                         },
                         pfile, pickle.HIGHEST_PROTOCOL)
-                print ('Augmented data ({} images) cached in pickle file.'.format(len(more_images)))
+                print ('\t\tGenerated and saved ({} input_images) for subsequent use.'.format(len(more_images)))
             except Exception as e:
-                print('Unable to save data to', more_data_file, ':', e)
+                print('\t\tUnable to save data to', more_data_file, ':', e)
                 raise
+    else:
+        print ("\tData already exists.")
     
     with open(more_data_file, 'rb') as f:
+        print ("\tReading in augmented data...")
         more = pickle.load(f)
         x_more, y_more = more[FEATURES], more[LABELS]
-        print ("Augmented data count:\t{}".format(len(x_more)))
-        plot_images(x_more[0:9], cls_true=y_more[0:9])
+        print ("\t\tAugmented data count:\t{}".format(len(x_more)))
+        #plot_images(x_more[0:9], actual_labels=y_more[0:9])
         x_train = np.concatenate((x_train, x_more))
         y_train = np.concatenate((y_train, y_more))
 
 # Free up some memory
 del sizes_train, sizes_test, coords_train, coords_test
 
-# Shuffle the training and testing data:
-seq_train = np.arange(0, len(x_train))
-seq_test = np.arange(0, len(x_test))
-np.random.shuffle(seq_train)
-np.random.shuffle(seq_test)
-x_train = np.array([ x_train[i] for i in seq_train])
-y_train = np.array([ y_train[i] for i in seq_train])
-x_test = np.array([ x_test[i] for i in seq_test])
-y_test = np.array([ y_test[i] for i in seq_test])
-
-# Normalize the images (and save originals)
-x_train_ = np.zeros_like(x_train, dtype=float32)
-x_test_ = np.zeros_like(x_test, dtype=float32)
+# Normalize the input_images (and save originals)
+x_train_norm = np.zeros_like(x_train, dtype=float32)
+x_test_norm = np.zeros_like(x_test, dtype=float32)
 for i in range(0, len(x_train)):
-    cv2.normalize(x_train[i], x_train_[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    cv2.normalize(x_train[i], x_train_norm[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 for i in range(0, len(x_test)):
-    cv2.normalize(x_test[i], x_test_[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    cv2.normalize(x_test[i], x_test_norm[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
 # Convert to the Dataset format
 num_classes = len(np.unique(y_train))
-y_train = dense_to_one_hot(y_train, num_classes) # One-hot encode all the labels
-y_test = dense_to_one_hot(y_test, num_classes) # One-hot encode all the labels
+y_train_hot = dense_to_one_hot(y_train, num_classes) # One-hot encode all the labels
+y_test_hot = dense_to_one_hot(y_test, num_classes) # One-hot encode all the labels
 
-traindata = DataSet(x_train_, y_train, reshape=False) # Use the normalized images (x_train_)
-testdata = DataSet(x_test_, y_test, reshape=False) # Use the normalized images (x_test_)
+# Define container for all data related to training/testing
+Data = namedtuple ('Data', ['images', 'pre_images', 'labels', 'hot_labels', 'count', 'batch_size'])
+Meta = namedtuple ('Meta', ['image_shape', 'num_channels', 'num_classes'])
+Params = namedtuple ('Params', ['num_train_epochs', \
+                                'learning_rate', \
+                                'dropout', \
+                                'validation_set_size', \
+                                'validation_frequency', \
+                                'training_accuracy_threshold', \
+                                'do_checkpointing'])
 
-data = Datasets(train=traindata, validation=None, test=testdata)
-data.test.cls = np.argmax(data.test.labels, axis=1)
-data.train.cls = np.argmax(data.train.labels, axis=1)
+train = Data(x_train_norm, x_train, y_train, y_train_hot, len(x_train), batch_size=128) # Use the normalized input_images (x_train_norm)
+test = Data(x_test_norm, x_test, y_test, y_test_hot, len(x_test), batch_size=256) # Use the normalized input_images (x_test_norm)
+meta = Meta(x_test_norm[0].shape, len(x_test[0][0][0]), num_classes)
+params = Params (\
+                 num_train_epochs=None,
+                 learning_rate=1e-3,
+                 dropout=0.5,
+                 validation_set_size=int(0.05 * train.count),
+                 validation_frequency=100, # Validation is performed every 'n' batches
+                 training_accuracy_threshold=0.95, \
+                 do_checkpointing=True)
 
 print("Size of:")
-print("- Training-set:\t\t{}".format(len(data.train.labels)))
-print("- Test-set:\t\t{}".format(len(data.test.labels)))
-print("- Shape:\t\t{}".format(img_shape))
-print("- Num channels:\t{}".format(num_channels))
-print("- Num classes:\t{}".format(num_classes))
+print("- Training-set:\t\t{}".format(train.count))
+print("- Test-set:\t\t{}".format(test.count))
+print("- Shape:\t\t{}".format(meta.image_shape))
+print("- Num channels:\t{}".format(meta.num_channels))
+print("- Num classes:\t{}".format(meta.num_classes))
 
 def new_weights(shape):
     return tf.Variable(tf.truncated_normal(shape, stddev=0.05))
@@ -269,19 +280,18 @@ def new_weights(shape):
 def new_biases(length):
     return tf.Variable(tf.constant(0.05, shape=[length]))
 
-
 def new_conv_layer(input,              # The previous layer.
                    num_input_channels, # Num. channels in prev. layer.
                    filter_size,        # Width and height of each filter.
                    num_filters,        # Number of filters.
-                   use_pooling=True):  # Use 2x2 max-pooling.
+                   use_pooling=False):  # Use 2x2 max-pooling.
     shape = [filter_size, filter_size, num_input_channels, num_filters]
     weights = new_weights(shape=shape)
     biases = new_biases(length=num_filters)
     layer = tf.nn.conv2d(input=input, filter=weights, strides=[1, 1, 1, 1], padding='SAME')
     layer += biases
     if use_pooling:
-        layer = tf.nn.max_pool(value=layer, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
+        layer = tf.nn.max_pool(value=layer, ksize=[1, 3, 3, 1], strides=[1, 3, 3, 1], padding='SAME')
     layer = tf.nn.relu(layer)
     return layer, weights
 
@@ -303,58 +313,92 @@ def new_fc_layer(input,          # The previous layer.
         layer = tf.nn.relu(layer)
     return layer
 
-def optimize(num_iterations):
-    # Ensure we update the global variable rather than a local copy.
-    global iteration_counter
-    start_time = time.time()
-    for i in range(iteration_counter, iteration_counter + num_iterations):
-        x_batch, y_true_batch = data.train.next_batch(train_batch_size)
-        feed_dict_train = {x: x_batch, y_true: y_true_batch, keep_prob: dropout}
+def generate_batches(data):
+    batches = []
+    num_batches = int(np.ceil(data.count / data.batch_size))
+    for batch in range(num_batches):
+        i = batch * data.batch_size
+        j = i + min(data.batch_size, data.count - i)
+        batches.append((i, j))
+    return batches
+
+# Shuffle the training and testing data:
+def shuffle (data):
+    seq = np.arange(0, len(data.images))
+    np.random.shuffle(seq)
+    images = np.array([ data.images[i] for i in seq])
+    pre_images = np.array([ data.pre_images[i] for i in seq])
+    labels = np.array([ data.labels[i] for i in seq])
+    hot_labels = np.array([ data.hot_labels[i] for i in seq])
+    return Data(images=images, pre_images=pre_images, labels=labels, hot_labels=hot_labels, count=len(images), batch_size=data.batch_size)
+
+def check_accuracy(label_predictor, data, meta, params):
+    tmp = data
+    predictions = np.zeros(shape=data.count, dtype=np.int)
+    batches = generate_batches(data)
+    for batch in range(len(batches)):
+        (i, j) = batches[batch]
+        (test_images, hot_labels) = (tmp.images[i:j], tmp.hot_labels[i:j])
+        feed_dict_test = {images: test_images, actual_hot_labels: hot_labels, keep_prob: params.dropout}
+        predictions[i:j] = session.run(label_predictor, feed_dict=feed_dict_test)
+
+    gradings = (data.labels == predictions)
+    correct_sum = gradings.sum()
+    acc = float(correct_sum) / data.count    
+    return correct_sum, acc, label_predictor, gradings
+
+def train_epoch(optimizer, predictor, data, meta, params):
+    epoch_start_time = time.time()
+
+    # Prepare split (it is assumed that the data is already shuffled)
+    num_train_samples = data.count - params.validation_set_size # Keep the last few for validation
+    print ("\t\tSplit:\tTraining = {} samples ({:.1%})\t \ Validation = {} samples ({:.1%})".format(num_train_samples, \
+                                                                                               num_train_samples/data.count,\
+                                                                                               params.validation_set_size,\
+                                                                                               params.validation_set_size/data.count))
+    train_data = Data(\
+                      images=data.images[0:num_train_samples],
+                      pre_images=data.pre_images[0:num_train_samples],
+                      labels=data.labels[0:num_train_samples],
+                      hot_labels=data.hot_labels[0:num_train_samples],
+                      count=num_train_samples,
+                      batch_size=data.batch_size)
+    validation_data = Data(\
+                           images=data.images[num_train_samples:data.count],
+                           pre_images=data.pre_images[num_train_samples:data.count],
+                           labels=data.labels[num_train_samples:data.count],
+                           hot_labels=data.hot_labels[num_train_samples:data.count],
+                           count=params.validation_set_size,
+                           batch_size=data.batch_size)
+    
+    train_batches = generate_batches(train_data)
+    for train_batch in range(len(train_batches)):
+        (i, j) = train_batches[train_batch]
+        (train_images, train_hot_labels) = (train_data.images[i:j], train_data.hot_labels[i:j])
+        feed_dict_train = {images: train_images, actual_hot_labels: train_hot_labels, keep_prob: params.dropout}
         session.run(optimizer, feed_dict=feed_dict_train)
-        if i % 100 == 0:
-            acc = session.run(accuracy, feed_dict=feed_dict_train)
-            msg = "Optimization Iteration: {0:>6}, Training Accuracy: {1:>6.1%}"
-            print(msg.format(i + 1, acc))
-    iteration_counter += num_iterations
-    end_time = time.time()
-    time_dif = end_time - start_time
-    print("Time usage: " + str(timedelta(seconds=int(round(time_dif)))))
 
-# Function for plotting examples of images from the test-set that have been mis-classified.
-def plot_example_errors(cls_pred, correct):
-    incorrect = (correct == False)
-    images = x_test[incorrect]
-    cls_pred = cls_pred[incorrect]
-    cls_true = data.test.cls[incorrect]
-    plot_images(images=images[0:9], cls_true=cls_true[0:9], cls_pred=cls_pred[0:9])
+        # Every 100 batches, we run the validation set:
+        if train_batch % params.validation_frequency == 0:
+            correct, accuracy, predictions, gradings = check_accuracy(predictor, validation_data, meta, params)
+            print("\t\tTraining batch: {:>6}, Validation-Accuracy: {:.1%} ({} / {})".format(train_batch+1, accuracy, correct, validation_data.count))
+            #plot_example_errors(validation_data, predictions, gradings)
+ 
+    epoch_end_time = time.time()
+    epoch_time_dif = epoch_end_time - epoch_start_time
+    print("\t\tEpoch time usage: " + str(timedelta(seconds=int(round(epoch_time_dif)))))
 
-def print_test_accuracy(show_example_errors=False):
-    num_test = len(data.test.images)
-    cls_pred = np.zeros(shape=num_test, dtype=np.int)
-    i = 0
-    while i < num_test:
-        j = min(i + test_batch_size, num_test)
-        images = data.test.images[i:j, :]
-        labels = data.test.labels[i:j, :]
-        feed_dict = {x: images, y_true: labels, keep_prob: dropout}
-        cls_pred[i:j] = session.run(y_pred_cls, feed_dict=feed_dict)
-        i = j
-    cls_true = data.test.cls
-    correct = (cls_true == cls_pred)
-    correct_sum = correct.sum()
-    acc = float(correct_sum) / num_test
-    msg = "Accuracy on Test-Set: {0:.1%} ({1} / {2})"
-    print(msg.format(acc, correct_sum, num_test))
-    if show_example_errors:
-        print("Example errors:")
-        plot_example_errors(cls_pred=cls_pred, correct=correct)
+# Function for plotting examples of input_images from the test-set that have been mis-classified.
+def plot_example_errors(data, predictions, gradings):
+    incorrect = (gradings == False)
+    images = data.images[incorrect] #images = [ data.images[i] for i in range(data.count) where incorrect[i]]
+    predictions = predictions[incorrect]
+    actuals = data.labels[incorrect]
+    plot_images(images=images[0:9], actual_labels=actuals[0:9], predictions=predictions[0:9])
 
 # Helper-function for plotting an image.
 def plot_image(image):
-    plt.imshow(image.reshape(img_shape),
-               interpolation='nearest',
-               cmap='binary')
-
+    plt.imshow(image.reshape(img_shape), interpolation='nearest', cmap='binary')
     plt.show()
 
 ### End of methods
@@ -363,60 +407,101 @@ def plot_image(image):
 #          PIPELINE             #
 #################################
 
-train_batch_size = 64
-train_num_epochs = 300
-test_batch_size = 256
-iteration_counter = 0
-learning_rate = 1e-3
-dropout = 0.5 # % of outputs to keep
+# Convolutional layers:
+filter_size1 = 5          # Convolution filters are 5 input_images 5 pixels.
+num_filters1 = 32         # There are 16 of these filters.
 
-# Convolutional Layer 1.
-filter_size1 = 5          # Convolution filters are 5 x 5 pixels.
-num_filters1 = 16         # There are 16 of these filters.
+filter_size2 = 5          # Convolution filters are 5 input_images 5 pixels.
+num_filters2 = 64         # There are 36 of these filters.
 
-# Convolutional Layer 2.
-filter_size2 = 5          # Convolution filters are 5 x 5 pixels.
-num_filters2 = 36         # There are 36 of these filters.
+filter_size3 = 5          # Convolution filters are 5 input_images 5 pixels.
+num_filters3 = 128         # There are 36 of these filters.
 
 # Fully-connected layer.
-fc_size = 128             # Number of neurons in fully-connected layer.
+fc_size = 1024             # Number of neurons in fully-connected layer.
 
-images = x_test[0:9]
-cls_true = data.test.cls[0:9]
-plot_images(images=images, cls_true=cls_true)
+# Plot some training samples
+#plot_images(images=train.pre_images[0:9], actual_labels=train.labels[0:9])
 
-x = tf.placeholder(tf.float32, shape=[None, img_size, img_size, num_channels], name='x')
-y_true = tf.placeholder(tf.float32, shape=[None, num_classes], name='y_true')
-y_true_cls = tf.argmax(y_true, dimension=1)
+images = tf.placeholder(tf.float32, shape=[None, img_size, img_size, num_channels], name='images')
+actual_hot_labels = tf.placeholder(tf.float32, shape=[None, num_classes], name='actual_hot_labels')
+actual_labels = tf.argmax(actual_hot_labels, dimension=1)
 keep_prob = tf.placeholder(tf.float32) #dropout (keep probability)
 
 # Network architecture/layers
 layer, _ = None, None
-layer, _ = layer_conv1, weights_conv1 = new_conv_layer(input=x, num_input_channels=num_channels, filter_size=filter_size1, num_filters=num_filters1, use_pooling=True)
-layer, _ = layer_conv2, weights_conv2 = new_conv_layer(input=layer, num_input_channels=num_filters1, filter_size=filter_size2, num_filters=num_filters2, use_pooling=True)
-layer, _ = layer_flat, num_features = flatten_layer(layer)
-layer = layer_fc1 = new_fc_layer(input=layer, num_inputs=num_features, num_outputs=fc_size, use_relu=True)
-layer = layer_dropout = tf.nn.dropout(layer, keep_prob)
-layer = layer_fc2 = new_fc_layer(input=layer, num_inputs=fc_size, num_outputs=num_classes, use_relu=False)
-y_pred = tf.nn.softmax(layer)
-y_pred_cls = tf.argmax(y_pred, dimension=1)
-cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=layer, labels=y_true)
-cost = tf.reduce_mean(cross_entropy)
+layer, _ = layer_conv1, weights_conv1 = new_conv_layer(input=images, num_input_channels=num_channels, filter_size=filter_size1, num_filters=num_filters1, use_pooling=True)
+layer = layer_dropout1 = tf.nn.dropout(layer, keep_prob)
 
-optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate).minimize(cost)
+layer, _ = layer_conv2, weights_conv2 = new_conv_layer(input=layer, num_input_channels=num_filters1, filter_size=filter_size2, num_filters=num_filters2, use_pooling=True)
+layer = layer_dropout2 = tf.nn.dropout(layer, keep_prob)
+
+layer, _ = layer_conv3, weights_conv3 = new_conv_layer(input=layer, num_input_channels=num_filters2, filter_size=filter_size3, num_filters=num_filters3, use_pooling=True)
+layer = layer_dropout3 = tf.nn.dropout(layer, keep_prob)
+
+layer, _ = layer_flat, num_features = flatten_layer(layer)
+
+layer = layer_fc1 = new_fc_layer(input=layer, num_inputs=num_features, num_outputs=fc_size, use_relu=True)
+layer = layer_dropout4 = tf.nn.dropout(layer, keep_prob)
+
+layer = layer_fc2 = new_fc_layer(input=layer, num_inputs=fc_size, num_outputs=num_classes, use_relu=False)
+layer = logits = layer_dropout5 = tf.nn.dropout(layer, keep_prob)
+
+hot_label_predictor = tf.nn.softmax(logits)
+label_predictor = tf.argmax(hot_label_predictor, dimension=1)
+cross_entropy = tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=actual_hot_labels)
+cost = tf.reduce_mean(cross_entropy)
+optimizer = tf.train.AdamOptimizer(learning_rate=params.learning_rate).minimize(cost)
+#correct_prediction = tf.equal(label_predictor, actual_labels)
+#accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
+
+print ("Intializing session:")
+saver = tf.train.Saver()
+session = tf.Session()
+if ((not saver is None) and (params.do_checkpointing) and (os.path.isfile(checkpoint_file))):
+    print ("\tUsing checkpoint.")
+    saver.restore(session, checkpoint_file)
+else:
+    print ("\tUsing default initialization.")
+    session.run(tf.initialize_all_variables())
+
+# Now start the training epochs
+unlimited_epochs = params.num_train_epochs == None or params.num_train_epochs <= 0
+keep_going = True
+epoch = 0
+while keep_going:
+    if os.path.isfile(abort_file):
+        print ("\tAbort file found. Aborting training. [To continue, re-run training.]")
+        os.remove(abort_file)
+        break
+
+    print ("\tTraining epoch: {}".format(epoch+1))
+    train = shuffle(train)
+    train_epoch(optimizer, label_predictor, train, meta, params)
+
+    if (params.do_checkpointing):
+        print ("\t\tSaving checkpoint.")
+        saver.save(session, checkpoint_file)
+        
+    test = shuffle(test)
+    correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params)
+    print("\t\t\tAccuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
+        
+    if accuracy >= params.training_accuracy_threshold:
+        print("\t\t\tAchieved threshold accuracy! Ending training.")
+        break
+    epoch += 1
+    keep_going = unlimited_epochs or epoch < params.num_train_epochs
+
+test = shuffle(test)
+correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params)
+print("Final accuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
+
+print ("\nDONE!")
+#plot_example_errors(test, predictions, gradings)
+
 #optimizer = tf.train.AdagradOptimizer(learning_rate=learning_rate, initial_accumulator_value=0.5).minimize(cost)
 #optimizer = tf.train.FtrlOptimizer(learning_rate=learning_rate, l1_regularization_strength=0.0, l2_regularization_strength=0.0).minimize(cost)
 #optimizer = tf.train.GradientDescentOptimizer(learning_rate=learning_rate).minimize(cost)
 #optimizer = tf.train.MomentumOptimizer(learning_rate=learning_rate, momentum=0.8).minimize(cost)
 
-correct_prediction = tf.equal(y_pred_cls, y_true_cls)
-accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float32))
-
-session = tf.Session()
-session.run(tf.initialize_all_variables())
-
-for _ in range (0, 100):
-    optimize(num_iterations=100)
-    print_test_accuracy()
-    
-print_test_accuracy(show_example_errors=True)
