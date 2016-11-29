@@ -14,8 +14,7 @@ from tensorflow.contrib.learn.python.learn.datasets.mnist import dense_to_one_ho
 from collections import namedtuple
 
 def crop(image, coords, size):
-    
-        # Original dimensions of the image
+    # Original dimensions of the image
     org_x = size[0]
     org_y = size[1]
     
@@ -89,6 +88,9 @@ def push_away(image, newshape):
     return image
 
 def change_perspective(image):
+    return image
+
+def add_noise(image, noise):
     return image
 
 def resize(image, size):
@@ -173,11 +175,11 @@ def plot_images(images, actual_labels, label_predictor=None):
 # ## Load Data
 #from tensorflow.examples.tutorials.mnist import input_data
 import pickle
-training_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/train.p'
-testing_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/test.p'
-more_data_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/more_data.p'
-checkpoint_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/traffic.chk'
-abort_file = '/Users/safdar/Datasets/self-driving-car/traffic-signs-data/abort'
+training_file = 'data/train.p'
+testing_file = 'data/test.p'
+more_data_file = 'data/more_data.p'
+checkpoint_file = 'checkpoints/checkpoint.chk'
+abort_file = 'abort'
 
 FEATURES = 'features'
 LABELS = 'labels'
@@ -239,7 +241,6 @@ for i in range(0, len(x_train)):
 for i in range(0, len(x_test)):
     cv2.normalize(x_test[i], x_test_norm[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
 
-# Convert to the Dataset format
 num_classes = len(np.unique(y_train))
 y_train_hot = dense_to_one_hot(y_train, num_classes) # One-hot encode all the labels
 y_test_hot = dense_to_one_hot(y_test, num_classes) # One-hot encode all the labels
@@ -259,10 +260,10 @@ train = Data(x_train_norm, x_train, y_train, y_train_hot, len(x_train), batch_si
 test = Data(x_test_norm, x_test, y_test, y_test_hot, len(x_test), batch_size=256) # Use the normalized input_images (x_test_norm)
 meta = Meta(x_test_norm[0].shape, len(x_test[0][0][0]), num_classes)
 params = Params (\
-                 num_train_epochs=None,
+                 num_train_epochs=0,
                  learning_rate=1e-3,
-                 dropout=0.5,
-                 validation_set_size=int(0.05 * train.count),
+                 dropout=0.5, # this is actually keep_prob
+                 validation_set_size=int(0.10 * train.count),
                  validation_frequency=100, # Validation is performed every 'n' batches
                  training_accuracy_threshold=0.95, \
                  do_checkpointing=True)
@@ -352,7 +353,7 @@ def train_epoch(optimizer, predictor, data, meta, params):
 
     # Prepare split (it is assumed that the data is already shuffled)
     num_train_samples = data.count - params.validation_set_size # Keep the last few for validation
-    print ("\t\tSplit:\tTraining = {} samples ({:.1%})\t \ Validation = {} samples ({:.1%})".format(num_train_samples, \
+    print ("\t\tSplit:\tTraining = {} samples\t /\t Validation = {} samples ({:.1%}) split".format(num_train_samples, \
                                                                                                num_train_samples/data.count,\
                                                                                                params.validation_set_size,\
                                                                                                params.validation_set_size/data.count))
@@ -431,21 +432,21 @@ keep_prob = tf.placeholder(tf.float32) #dropout (keep probability)
 # Network architecture/layers
 layer, _ = None, None
 layer, _ = layer_conv1, weights_conv1 = new_conv_layer(input=images, num_input_channels=num_channels, filter_size=filter_size1, num_filters=num_filters1, use_pooling=True)
-layer = layer_dropout1 = tf.nn.dropout(layer, keep_prob)
+#layer = layer_dropout1 = tf.nn.dropout(layer, keep_prob)
 
 layer, _ = layer_conv2, weights_conv2 = new_conv_layer(input=layer, num_input_channels=num_filters1, filter_size=filter_size2, num_filters=num_filters2, use_pooling=True)
-layer = layer_dropout2 = tf.nn.dropout(layer, keep_prob)
+#layer = layer_dropout2 = tf.nn.dropout(layer, keep_prob)
 
 layer, _ = layer_conv3, weights_conv3 = new_conv_layer(input=layer, num_input_channels=num_filters2, filter_size=filter_size3, num_filters=num_filters3, use_pooling=True)
-layer = layer_dropout3 = tf.nn.dropout(layer, keep_prob)
+#layer = layer_dropout3 = tf.nn.dropout(layer, keep_prob)
 
 layer, _ = layer_flat, num_features = flatten_layer(layer)
 
 layer = layer_fc1 = new_fc_layer(input=layer, num_inputs=num_features, num_outputs=fc_size, use_relu=True)
 layer = layer_dropout4 = tf.nn.dropout(layer, keep_prob)
 
-layer = layer_fc2 = new_fc_layer(input=layer, num_inputs=fc_size, num_outputs=num_classes, use_relu=False)
-layer = logits = layer_dropout5 = tf.nn.dropout(layer, keep_prob)
+layer = logits = layer_fc2 = new_fc_layer(input=layer, num_inputs=fc_size, num_outputs=num_classes, use_relu=False)
+#layer = logits = layer_dropout5 = tf.nn.dropout(layer, keep_prob)
 
 hot_label_predictor = tf.nn.softmax(logits)
 label_predictor = tf.argmax(hot_label_predictor, dimension=1)
@@ -458,7 +459,7 @@ optimizer = tf.train.AdamOptimizer(learning_rate=params.learning_rate).minimize(
 print ("Intializing session:")
 saver = tf.train.Saver()
 session = tf.Session()
-if ((not saver is None) and (params.do_checkpointing) and (os.path.isfile(checkpoint_file))):
+if ((not saver is None) and (os.path.isfile(checkpoint_file))):
     print ("\tUsing checkpoint.")
     saver.restore(session, checkpoint_file)
 else:
@@ -466,36 +467,40 @@ else:
     session.run(tf.initialize_all_variables())
 
 # Now start the training epochs
-unlimited_epochs = params.num_train_epochs == None or params.num_train_epochs <= 0
-keep_going = True
-epoch = 0
-while keep_going:
-    if os.path.isfile(abort_file):
-        print ("\tAbort file found. Aborting training. [To continue, re-run training.]")
-        os.remove(abort_file)
-        break
-
-    print ("\tTraining epoch: {}".format(epoch+1))
-    train = shuffle(train)
-    train_epoch(optimizer, label_predictor, train, meta, params)
-
-    if (params.do_checkpointing):
-        print ("\t\tSaving checkpoint.")
-        saver.save(session, checkpoint_file)
-        
+unlimited_epochs = params.num_train_epochs == None
+if (unlimited_epochs or params.num_train_epochs > 0):
+    keep_going = True
+    epoch = 0
+    while keep_going:
+        if os.path.isfile(abort_file):
+            print ("\tAbort file found. Aborting training. [To continue, re-run training.]")
+            os.remove(abort_file)
+            break
+    
+        print ("\tTraining epoch: {}".format(epoch+1))
+        train = shuffle(train)
+        train_epoch(optimizer, label_predictor, train, meta, params)
+    
+        if (params.do_checkpointing):
+            print ("\t\tSaving checkpoint.")
+            saver.save(session, checkpoint_file)
+        else:
+            print ("\t\tCheckpointing disabled.")
+            
+        test = shuffle(test)
+        correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params)
+        print("\t\t\tAccuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
+            
+        if accuracy >= params.training_accuracy_threshold:
+            print("\t\t\tAchieved threshold accuracy! Ending training.")
+            break
+        epoch += 1
+        keep_going = unlimited_epochs or epoch < params.num_train_epochs
+    
     test = shuffle(test)
     correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params)
-    print("\t\t\tAccuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
-        
-    if accuracy >= params.training_accuracy_threshold:
-        print("\t\t\tAchieved threshold accuracy! Ending training.")
-        break
-    epoch += 1
-    keep_going = unlimited_epochs or epoch < params.num_train_epochs
+    print("Final accuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
 
-test = shuffle(test)
-correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params)
-print("Final accuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
 
 print ("\nDONE!")
 #plot_example_errors(test, predictions, gradings)
