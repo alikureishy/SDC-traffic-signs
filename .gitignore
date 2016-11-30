@@ -5,3 +5,4 @@ data
 models
 *.swp
 *.p
+.DS_Store

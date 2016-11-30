@@ -5,7 +5,9 @@ import cv2
 import pickle
 import numpy as np
 import matplotlib
-from plottools import plot_example_errors
+matplotlib.use('TkAgg')
+#%matplotlib inline
+from plottools import plot_example_errors, plot_images
 matplotlib.use('TkAgg')
 from numpy import float32
 import tensorflow as tf
@@ -202,7 +204,7 @@ if (unlimited_epochs or params.num_train_epochs > 0):
             print ("\t\tCheckpointing disabled.")
             
         test = shuffle(test)
-        correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params)
+        correct, accuracy, predictions, gradings = check_accuracy(label_predictor, test, meta, params, session, images, actual_hot_labels, keep_prob)
         print("\t\t\tAccuracy on Test-Set: {0:.1%} ({1} / {2})".format(accuracy, correct, test.count))
             
         if accuracy >= params.training_accuracy_threshold:
@@ -247,6 +249,8 @@ mappings = {"130_km_1.jpg": 8, # This is incorrect, but the closest match
 preimages, imgs, labels, labelsonehot = read_images(real_dir, mappings, 43)
 data = Data(pre_images = preimages, images=imgs, labels=labels, hot_labels=labelsonehot, count=len(preimages), batch_size=100)
 data = shuffle(data)
+plot_images(data.preimages[0:9], data.labels[0:9])
+
 correct, acc, predictions, gradings = check_accuracy(label_predictor, data, meta, params, session, images, actual_hot_labels, keep_prob)
 print ("Real data results:")
 print ("\t#Samples: {}".format(len(imgs)))

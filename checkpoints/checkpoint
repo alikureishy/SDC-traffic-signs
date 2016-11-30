@@ -1,0 +1,2 @@
+model_checkpoint_path: "ipnb_checkpoint.chk"
+all_model_checkpoint_paths: "ipnb_checkpoint.chk"

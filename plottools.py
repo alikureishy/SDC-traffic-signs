@@ -1,5 +1,4 @@
 import matplotlib
-matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 # Function used to plot 9 input_images in a 3x3 grid, and writing the true and predicted classes below each image.
