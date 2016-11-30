@@ -246,10 +246,10 @@ mappings = {"130_km_1.jpg": 8, # This is incorrect, but the closest match
             "bicycle_2.jpg": 29,
             "no_entry_1.jpg": 17}
 
-preimages, imgs, labels, labelsonehot = read_images(real_dir, mappings, 43)
+preimages, imgs, labels, labelsonehot, names = read_images(real_dir, mappings, 43)
 data = Data(pre_images = preimages, images=imgs, labels=labels, hot_labels=labelsonehot, count=len(preimages), batch_size=100)
 data = shuffle(data)
-plot_images(data.preimages[0:9], data.labels[0:9])
+plot_images(data.pre_images[0:9], data.labels[0:9])
 
 correct, acc, predictions, gradings = check_accuracy(label_predictor, data, meta, params, session, images, actual_hot_labels, keep_prob)
 print ("Real data results:")
@@ -257,3 +257,14 @@ print ("\t#Samples: {}".format(len(imgs)))
 print ("\tAccuracy: {:.1%}".format(acc))
 print ("Here are some sample errors:")
 plot_example_errors(data, predictions, gradings)
+
+# Now figure out closest matches:
+top_k_layer = tf.nn.top_k(hot_label_predictor, k=3, sorted=True, name='top_k_layer')
+data = shuffle(data)
+feed_dict_train = {images: imgs, actual_hot_labels: labelsonehot, keep_prob: params.dropout}
+(top_k_values, top_k_indices) = session.run(top_k_layer, feed_dict=feed_dict_train)
+
+print ("Here are the closest matches...")
+for i in range(len(top_k_values)):
+        matches = top_k_indices[i]
+        print ("\tImage #: [{}] {} ~~~ {}".format(i, names[i], matches))

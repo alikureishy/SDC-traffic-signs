@@ -192,6 +192,7 @@ def listdir_nohidden(path):
 def read_images(dir, mappings, num_classes):
     pre_images = np.zeros((1000, 32, 32, 3))
     labels = []
+    names = []
     
     files = listdir_nohidden(dir)
     for i in range(len(files)):
@@ -203,6 +204,7 @@ def read_images(dir, mappings, num_classes):
             
             pre_images[i] = pre_image
             labels.append(label)
+            names.append(file)
         else:
             print (file, " not in mappings")
     
@@ -217,4 +219,4 @@ def read_images(dir, mappings, num_classes):
     for i in range(0, len(pre_images)):
         cv2.normalize(pre_images[i], images[i], 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
     
-    return pre_images, images, labels, labels_onehot
+    return pre_images, images, labels, labels_onehot, names
