@@ -1,8 +1,5 @@
 __pycache__
-data
 .ipynb_checkpoints
 *.h5
-models
 *.swp
-*.p
 .DS_Store
