@@ -149,14 +149,22 @@ def equalize_distribution(xs, ys, coords, sizes):
                 for idx in range(needed):
                     i = idx % len(images)
                     image = images[i]
-                    
-                    # TODO: Move transformation code over to another location in the source
-                    
                     more_images.append(image)
                     more_labels.append(cls)
         
     return more_images, more_labels
 
+#                     # Can look at: https://github.com/Hvass-Labs/TensorFlow-Tutorials/blob/master/06_CIFAR-10.ipynb
+#                     #   for ideas for image transformations
+#                     #image = crop(image, coords[i], sizes[i])
+#                     #image = addnoise(image, 5)
+#                     #image = rotate(image)
+#                     #image = sharpen_blur(image)
+#                     #image = push_away(image, (img_size, img_size, num_channels))
+#                     #image = change_perspective(image)
+#                     image = transform_image(image, 20, 10, 5)
+#                     image = resize(image, img_size) # Get image back to required size, in case that changed
+#                     
 
 def print_distribution(xs, ys):
     num_images = len(xs)
